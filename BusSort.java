@@ -1,15 +1,16 @@
 import java.util.Arrays;
 import java.util.concurrent.ThreadLocalRandom;
 
-// WORK IN PROGRESS — stable reverse and generic support coming soon.
+// BusSort — cache-aware, stable, histogram-based integer sorting algorithm.
+// Generic support: see BusSortGenerics.java
 public class BusSort {
 
-    static final int BUCKETS = 128;
+    static final int BUCKETS = 128; // 64 for small data
     static final int BUS_SIZE = 4096;
     static final int THRESHOLD = 1024;
 
     static int bucketOf(int value, int min, int range) {
-        return Math.min((value - min) / range, BUCKETS - 1);
+        return (int) Math.min(((long) value - min) / range, BUCKETS - 1);
     }
 
     // ============================================================
@@ -30,9 +31,10 @@ public class BusSort {
                 max = input[i];
         }
 
-        int range = (int) Math.ceil((double) (max - min + 1) / BUCKETS);
-        if (range <= 0)
-            range = 1;
+        long rangeL = ((long) max - min + 1 + BUCKETS - 1) / BUCKETS;
+        if (rangeL <= 0)
+            rangeL = 1;
+        int range = (int) Math.min(rangeL, Integer.MAX_VALUE);
 
         // GLOBAL HISTOGRAM
         Arrays.fill(globalCount, 0);
@@ -119,7 +121,7 @@ public class BusSort {
             }
 
             if (min == max)
-                continue; // all equal → already sorted!
+                continue; // already sorted!
 
             distributeRange(arr, l, r, buf, globalCount, bucketStarts,
                     globalNext, busValues, busBucket,
@@ -155,17 +157,29 @@ public class BusSort {
             if (!sorted && !reverse)
                 break;
         }
+
         if (sorted)
             return;
 
         int[] buf = new int[n];
 
-        // REVERSE IS NOT STABLE YET!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         if (reverse) {
-            // copy into buf in reverse order
-            for (int i = 0; i < n; i++)
-                buf[i] = arr[n - 1 - i];
+            int left = 0;
+            int right = n - 1;
+
+            while (0 <= right) {
+                int flag = right;
+                while (flag > 0 && arr[flag - 1] == arr[right]) {
+                    flag--;
+                }
+                for (int i = flag; i <= right; i++) {
+                    buf[left++] = arr[i];
+                }
+                right = flag - 1;
+            }
+
             System.arraycopy(buf, 0, arr, 0, n);
+
             return;
         }
 
@@ -205,6 +219,9 @@ public class BusSort {
     public static void main(String[] args) {
         int n = 100000000;
         System.out.println("n = " + n);
+        System.out.println("BUCKETS: " + BUCKETS);
+        System.out.println("BUS_SIZE: " + BUS_SIZE);
+        System.out.println("THRESHOLD: " + THRESHOLD);
         System.out.println("--------------------------------------------");
 
         String[] names = { "RANDOM", "SORTED", "REVERSE", "NEARLY SORTED",
@@ -215,7 +232,7 @@ public class BusSort {
             switch (type) {
                 case 0:
                     for (int i = 0; i < n; i++)
-                        arr1[i] = ThreadLocalRandom.current().nextInt(-n, n);
+                        arr1[i] = ThreadLocalRandom.current().nextInt();
                     break;
                 case 1:
                     for (int i = 0; i < n; i++)
@@ -280,7 +297,7 @@ public class BusSort {
                     names[type],
                     (e1 - s1) / 1000000, (e2 - s2) / 1000000,
                     (double) (e2 - s2) / (e1 - s1),
-                    correct ? "TRUE" : "FALSE");
+                    correct ? "✅" : "❌");
         }
     }
 }
