@@ -157,7 +157,7 @@ On i5-1135G7 (48KB L1): `4096 × 3 × 4 = 49,152 bytes ≈ 48KB` — fitting exa
 
 ## Roadmap
 
-- [ ] Benchmark generic variant against TimSort
+- [ ] Benchmark generic variant against TimSort (Work in progress...)
 - [ ] Auto-tune `BUS_SIZE` based on runtime L1 cache size
 - [ ] Parallel / multi-threaded variant
 - [ ] Port to C for lower-level benchmarking
