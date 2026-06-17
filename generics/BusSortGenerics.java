@@ -1,32 +1,39 @@
+package dev.shreyas;
+
 import java.util.Arrays;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.ToIntFunction;
 
+// BusSortGenerics — cache-aware, stable, histogram-based sorting algorithm for generic objects.
+// Uses ToIntFunction<T> key extractor. Beats Java's TimSort on distribution-heavy inputs.
 public class BusSortGenerics {
 
-    static final int BUCKETS = 64;
+    static final int BUCKETS = 128;
     static final int BUS_SIZE = 4096;
     static final int THRESHOLD = 1024;
 
     // ============================================================
-    // LONG HELPERS
+    // BUCKET INDEX
     // ============================================================
-    static int bucketOfLong(long key, long min, long range) {
+    static int bucketOf(long key, long min, long range) {
         return (int) Math.min((key - min) / range, BUCKETS - 1);
     }
 
     // ============================================================
-    // LONG DISTRIBUTE
+    // DISTRIBUTE RANGE — T[] direct, zero packed allocation
     // ============================================================
-    public static void distributeRangeLong(long[] input, int left, int right,
-            long[] output, int[] globalCount, int[] bucketStarts,
-            int[] globalNext, long[] busValues, int[] busBucket,
-            long[] grouped, int[] localCount, int[] localStart, int[] localNext) {
+    @SuppressWarnings("unchecked")
+    public static <T> void distributeRange(T[] input, int left, int right,
+            T[] output, int[] globalCount, int[] bucketStarts,
+            int[] globalNext, T[] busObjects, int[] busBucket,
+            T[] grouped, int[] localCount, int[] localStart, int[] localNext,
+            ToIntFunction<T> keyExtractor) {
 
-        // use unsigned >>> 32 to get key
-        long min = input[left] >>> 32, max = input[left] >>> 32;
+        // MIN MAX
+        long min = keyExtractor.applyAsInt(input[left]);
+        long max = keyExtractor.applyAsInt(input[left]);
         for (int i = left + 1; i <= right; i++) {
-            long key = input[i] >>> 32;
+            long key = keyExtractor.applyAsInt(input[i]);
             if (key < min)
                 min = key;
             if (key > max)
@@ -37,10 +44,12 @@ public class BusSortGenerics {
         if (rangeL <= 0)
             rangeL = 1;
 
+        // GLOBAL HISTOGRAM
         Arrays.fill(globalCount, 0);
         for (int i = left; i <= right; i++)
-            globalCount[bucketOfLong(input[i] >>> 32, min, rangeL)]++;
+            globalCount[bucketOf(keyExtractor.applyAsInt(input[i]), min, rangeL)]++;
 
+        // GLOBAL PREFIX
         globalNext[0] = left;
         bucketStarts[0] = left;
         for (int i = 1; i < BUCKETS; i++) {
@@ -48,26 +57,31 @@ public class BusSortGenerics {
             bucketStarts[i] = bucketStarts[i - 1] + globalCount[i - 1];
         }
 
+        // PROCESS BUS CHUNKS
         for (int chunkStart = left; chunkStart <= right; chunkStart += BUS_SIZE) {
             int len = Math.min(BUS_SIZE, right - chunkStart + 1);
             Arrays.fill(localCount, 0, BUCKETS, 0);
 
+            // PASS 1 — extract key, assign bucket, cache object reference
             for (int i = 0; i < len; i++) {
-                long value = input[chunkStart + i];
-                int bucket = bucketOfLong(value >>> 32, min, rangeL);
-                busValues[i] = value;
+                T obj = input[chunkStart + i];
+                int bucket = bucketOf(keyExtractor.applyAsInt(obj), min, rangeL);
+                busObjects[i] = obj;
                 busBucket[i] = bucket;
                 localCount[bucket]++;
             }
 
+            // PASS 2 — local prefix sums
             localStart[0] = 0;
             for (int b = 1; b < BUCKETS; b++)
                 localStart[b] = localStart[b - 1] + localCount[b - 1];
             System.arraycopy(localStart, 0, localNext, 0, BUCKETS);
 
+            // PASS 3 — scatter objects into local grouped buffer
             for (int i = 0; i < len; i++)
-                grouped[localNext[busBucket[i]]++] = busValues[i];
+                grouped[localNext[busBucket[i]]++] = busObjects[i];
 
+            // PASS 4 — copy from grouped to global output
             for (int b = 0; b < BUCKETS; b++) {
                 int count = localCount[b];
                 if (count == 0)
@@ -79,12 +93,14 @@ public class BusSortGenerics {
     }
 
     // ============================================================
-    // LONG SORT CORE
+    // SORT CORE — T[]
     // ============================================================
-    public static void sortLongCore(long[] arr, int left, int right, long[] buf,
+    @SuppressWarnings("unchecked")
+    public static <T> void sortCore(T[] arr, int left, int right, T[] buf,
             int[] globalCount, int[] bucketStarts, int[] globalNext,
-            long[] busValues, int[] busBucket, long[] grouped,
-            int[] localCount, int[] localStart, int[] localNext) {
+            T[] busObjects, int[] busBucket, T[] grouped,
+            int[] localCount, int[] localStart, int[] localNext,
+            ToIntFunction<T> keyExtractor) {
 
         int[][] stack = new int[BUCKETS * 4][2];
         int top = 0;
@@ -99,26 +115,26 @@ public class BusSortGenerics {
             int n = r - l + 1;
 
             if (n <= THRESHOLD) {
-                insertionSortLong(arr, l, r);
+                insertionSort(arr, l, r, keyExtractor);
                 continue;
             }
 
-            long min = arr[l] >>> 32, max = arr[l] >>> 32;
+            long min = keyExtractor.applyAsInt(arr[l]);
+            long max = keyExtractor.applyAsInt(arr[l]);
             for (int i = l + 1; i <= r; i++) {
-                long key = arr[i] >>> 32;
+                long key = keyExtractor.applyAsInt(arr[i]);
                 if (key < min)
                     min = key;
                 if (key > max)
                     max = key;
             }
-            if (min == max) {
-                insertionSortLong(arr, l, r);
-                continue;
-            }
 
-            distributeRangeLong(arr, l, r, buf, globalCount, bucketStarts,
-                    globalNext, busValues, busBucket, grouped,
-                    localCount, localStart, localNext);
+            if (min == max)
+                continue; // all equal — stable, skip
+
+            distributeRange(arr, l, r, buf, globalCount, bucketStarts,
+                    globalNext, busObjects, busBucket, grouped,
+                    localCount, localStart, localNext, keyExtractor);
             System.arraycopy(buf, l, arr, l, n);
 
             for (int b = BUCKETS - 1; b >= 0; b--) {
@@ -134,7 +150,7 @@ public class BusSortGenerics {
     }
 
     // ============================================================
-    // GENERIC PUBLIC ENTRY
+    // PUBLIC ENTRY POINT
     // ============================================================
     @SuppressWarnings("unchecked")
     public static <T> void sort(T[] arr, ToIntFunction<T> keyExtractor) {
@@ -142,7 +158,7 @@ public class BusSortGenerics {
         if (n <= 1)
             return;
 
-        // early exit checks
+        // detect sorted / reverse
         boolean sorted = true, reverse = true;
         for (int i = 1; i < n; i++) {
             int a = keyExtractor.applyAsInt(arr[i - 1]);
@@ -157,62 +173,52 @@ public class BusSortGenerics {
         if (sorted)
             return;
 
-        if (reverse) {
-            T[] temp = (T[]) new Object[n];
+        T[] buf = (T[]) new Object[n]; // only allocation proportional to n
 
-            int left = 0;
-            int right = n - 1;
+        if (reverse) {
+            int left = 0, right = n - 1;
             while (0 <= right) {
                 int flag = right;
-                while (flag > 0 && keyExtractor.applyAsInt(arr[flag - 1]) == keyExtractor.applyAsInt(arr[right])) {
+                while (flag > 0 &&
+                        keyExtractor.applyAsInt(arr[flag - 1]) == keyExtractor.applyAsInt(arr[right])) {
                     flag--;
                 }
-                for (int i = flag; i <= right; i++) {
-                    temp[left++] = arr[i];
-                }
+                for (int i = flag; i <= right; i++)
+                    buf[left++] = arr[i];
                 right = flag - 1;
             }
-            System.arraycopy(temp, 0, arr, 0, n);
+            System.arraycopy(buf, 0, arr, 0, n);
             return;
         }
 
-        // XOR with 0x80000000 to convert signed to unsigned order
-        long[] packed = new long[n];
-        for (int i = 0; i < n; i++) {
-            long normKey = (long) (keyExtractor.applyAsInt(arr[i]) ^ 0x80000000);
-            packed[i] = (normKey << 32) | (i & 0xFFFFFFFFL);
-        }
-
-        long[] buf = new long[n];
+        // BUS_SIZE auxiliary arrays only
         int[] globalCount = new int[BUCKETS], bucketStarts = new int[BUCKETS];
         int[] globalNext = new int[BUCKETS];
-        long[] busValues = new long[BUS_SIZE], grouped = new long[BUS_SIZE];
+        T[] busObjects = (T[]) new Object[BUS_SIZE];
         int[] busBucket = new int[BUS_SIZE];
+        T[] grouped = (T[]) new Object[BUS_SIZE];
         int[] localCount = new int[BUCKETS], localStart = new int[BUCKETS];
         int[] localNext = new int[BUCKETS];
 
-        sortLongCore(packed, 0, n - 1, buf, globalCount, bucketStarts,
-                globalNext, busValues, busBucket, grouped,
-                localCount, localStart, localNext);
-
-        T[] temp = (T[]) new Object[n];
-        for (int i = 0; i < n; i++)
-            temp[i] = arr[(int) (packed[i] & 0xFFFFFFFFL)];
-        System.arraycopy(temp, 0, arr, 0, n);
+        sortCore(arr, 0, n - 1, buf, globalCount, bucketStarts,
+                globalNext, busObjects, busBucket, grouped,
+                localCount, localStart, localNext, keyExtractor);
     }
 
     // ============================================================
-    // INSERTION SORT
+    // INSERTION SORT — stable, for base case
     // ============================================================
-    public static void insertionSortLong(long[] arr, int left, int right) {
+    public static <T> void insertionSort(T[] arr, int left, int right,
+            ToIntFunction<T> keyExtractor) {
         for (int i = left + 1; i <= right; i++) {
-            long key = arr[i];
+            T obj = arr[i];
+            int key = keyExtractor.applyAsInt(obj);
             int j = i - 1;
-            while (j >= left && Long.compareUnsigned(arr[j], key) > 0) {
+            while (j >= left && keyExtractor.applyAsInt(arr[j]) > key) {
                 arr[j + 1] = arr[j];
                 j--;
             }
-            arr[j + 1] = key;
+            arr[j + 1] = obj;
         }
     }
 
@@ -222,7 +228,7 @@ public class BusSortGenerics {
     public static void main(String[] args) {
         int n = 40000000;
         System.out.println("n = " + n);
-        System.out.println("Generic BusSort vs Timsort (Integer[])");
+        System.out.println("Generic BusSort vs TimSort (Integer[])");
         System.out.println("--------------------------------------------");
 
         String[] names = { "RANDOM", "SORTED", "REVERSE", "NEARLY SORTED",
@@ -247,7 +253,8 @@ public class BusSortGenerics {
                     for (int i = 0; i < n; i++)
                         arr1[i] = i;
                     for (int i = 0; i < n / 100; i++) {
-                        int a = ThreadLocalRandom.current().nextInt(n), b = ThreadLocalRandom.current().nextInt(n),
+                        int a = ThreadLocalRandom.current().nextInt(n),
+                                b = ThreadLocalRandom.current().nextInt(n),
                                 t = arr1[a];
                         arr1[a] = arr1[b];
                         arr1[b] = t;
@@ -286,19 +293,18 @@ public class BusSortGenerics {
             long e2 = System.nanoTime();
 
             boolean correct = true;
-            for (int i = 1; i < n; i++) {
+            for (int i = 1; i < n; i++)
                 if (arr1[i] < arr1[i - 1]) {
                     correct = false;
                     break;
                 }
-            }
 
-            System.out.printf("%-15s BusSort: %4dms  Timsort: %4dms  ratio: %.1fx  correct: %s%n",
+            System.out.printf("%-15s BusSort: %4dms  TimSort: %4dms  ratio: %.1fx  correct: %s%n",
                     names[type],
                     (e1 - s1) / 1000000, (e2 - s2) / 1000000,
                     (double) (e2 - s2) / (e1 - s1),
                     correct ? "✅" : "❌");
-        }
 
+        }
     }
 }
