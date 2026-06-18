@@ -98,6 +98,7 @@ This holds because:
 Equal-key objects in the generic variant are handled the same way — stability comes from traversal order, not from tagging or index tracking.
 
 The reverse-sorted early exit uses a three-pointer stable reverse — equal-key groups are copied left-to-right, preserving original order.
+> For `int[]`, equal integers are identical by value — stability is technically unobservable. However, the stable reverse path is intentionally preserved for consistency with the stability guarantee and to serve as a reference for future ports to other types.
 
 ---
 
