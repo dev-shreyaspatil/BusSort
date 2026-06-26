@@ -16,20 +16,11 @@ public class BusSort {
     // ============================================================
     // DISTRIBUTE RANGE — zero allocation
     // ============================================================
-    public static void distributeRange(int[] input, int left, int right,
+    public static void distributeRange(int[] input, int min, int max, int left, int right,
             int[] output, int[] globalCount, int[] bucketStarts,
             int[] globalNext, int[] busValues, int[] busBucket,
             int[] grouped, int[] localCount, int[] localStart, int[] localNext) {
 
-        // MIN MAX
-        int min = input[left];
-        int max = input[left];
-        for (int i = left + 1; i <= right; i++) {
-            if (input[i] < min)
-                min = input[i];
-            if (input[i] > max)
-                max = input[i];
-        }
 
         long rangeL = ((long) max - min + 1 + BUCKETS - 1) / BUCKETS;
         if (rangeL <= 0)
@@ -94,7 +85,7 @@ public class BusSort {
             int[] globalNext, int[] busValues, int[] busBucket, int[] grouped, int[] localCount, int[] localStart,
             int[] localNext) {
 
-        int[][] stack = new int[BUCKETS * 4][2];
+        int[][] stack = new int[BUCKETS * 8][2];
         int top = 0;
         stack[top][0] = left;
         stack[top][1] = right;
@@ -123,7 +114,7 @@ public class BusSort {
             if (min == max)
                 continue; // already sorted!
 
-            distributeRange(arr, l, r, buf, globalCount, bucketStarts,
+            distributeRange(arr,min, max, l, r, buf, globalCount, bucketStarts,
                     globalNext, busValues, busBucket,
                     grouped, localCount, localStart, localNext);
             System.arraycopy(buf, l, arr, l, n);
@@ -143,13 +134,13 @@ public class BusSort {
     // ============================================================
     // PUBLIC ENTRY POINT
     // ============================================================
-    public static void sort(int[] arr) {
-        int n = arr.length;
+    public static void sort(int[] arr, int left, int right) {
+        int n = right - left + 1;
 
         // detect sorted / reverse
         boolean sorted = true;
         boolean reverse = true;
-        for (int i = 1; i < n; i++) {
+        for (int i = left + 1; i <= right; i++) {
             if (arr[i] < arr[i - 1])
                 sorted = false;
             if (arr[i] > arr[i - 1])
@@ -164,21 +155,19 @@ public class BusSort {
         int[] buf = new int[n];
 
         if (reverse) {
-            int left = 0;
-            int right = n - 1;
-
-            while (0 <= right) {
+            int l = left;
+            while (left <= right) {
                 int flag = right;
-                while (flag > 0 && arr[flag - 1] == arr[right]) {
+                while (flag > left && arr[flag - 1] == arr[right]) {
                     flag--;
                 }
                 for (int i = flag; i <= right; i++) {
-                    buf[left++] = arr[i];
+                    buf[l++] = arr[i];
                 }
                 right = flag - 1;
             }
 
-            System.arraycopy(buf, 0, arr, 0, n);
+            System.arraycopy(buf, 0, arr, left, n);
 
             return;
         }
@@ -193,7 +182,7 @@ public class BusSort {
         int[] localStart = new int[BUCKETS];
         int[] localNext = new int[BUCKETS];
 
-        sort(arr, 0, n - 1, buf, globalCount, bucketStarts,
+        sort(arr, left, right, buf, globalCount, bucketStarts,
                 globalNext, busValues, busBucket,
                 grouped, localCount, localStart, localNext);
     }
@@ -279,7 +268,7 @@ public class BusSort {
                 arr2[i] = arr1[i];
 
             long s1 = System.nanoTime();
-            sort(arr1);
+            sort(arr1, 0, arr1.length-1);
             long e1 = System.nanoTime();
 
             long s2 = System.nanoTime();
