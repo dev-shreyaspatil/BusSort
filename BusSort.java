@@ -9,14 +9,14 @@ public class BusSort {
     static final int BUS_SIZE = 4096;
     static final int THRESHOLD = 1024;
 
-    static int bucketOf(int value, int min, int range) {
+    private static int bucketOf(int value, int min, int range) {
         return (int) Math.min(((long) value - min) / range, BUCKETS - 1);
     }
 
     // ============================================================
     // DISTRIBUTE RANGE — zero allocation
     // ============================================================
-    public static void distributeRange(int[] input, int min, int max, int left, int right,
+    private static void distributeRange(int[] input, int min, int max, int left, int right,
             int[] output, int[] globalCount, int[] bucketStarts,
             int[] globalNext, int[] busValues, int[] busBucket,
             int[] grouped, int[] localCount, int[] localStart, int[] localNext) {
@@ -81,7 +81,7 @@ public class BusSort {
     // ============================================================
     // SORT
     // ============================================================
-    public static void sort(int[] arr, int left, int right, int[] buf, int[] globalCount, int[] bucketStarts,
+    private static void sort(int[] arr, int left, int right, int[] buf, int[] globalCount, int[] bucketStarts,
             int[] globalNext, int[] busValues, int[] busBucket, int[] grouped, int[] localCount, int[] localStart,
             int[] localNext) {
 
@@ -134,6 +134,10 @@ public class BusSort {
     // ============================================================
     // PUBLIC ENTRY POINT
     // ============================================================
+    public static void sort(int[] arr){
+        sort(arr, 0, arr.length - 1);
+    }
+
     public static void sort(int[] arr, int left, int right) {
         int n = right - left + 1;
 
@@ -155,7 +159,7 @@ public class BusSort {
         int[] buf = new int[n];
 
         if (reverse) {
-            int l = left;
+            int l = 0;
             while (left <= right) {
                 int flag = right;
                 while (flag > left && arr[flag - 1] == arr[right]) {
@@ -190,7 +194,7 @@ public class BusSort {
     // ============================================================
     // INSERTION SORT
     // ============================================================
-    public static void insertionSort(int[] arr, int left, int right) {
+    private static void insertionSort(int[] arr, int left, int right) {
         for (int i = left + 1; i <= right; i++) {
             int key = arr[i];
             int j = i - 1;
