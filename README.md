@@ -22,7 +22,7 @@ Two variants are available:
 |----------|---------|
 | **Naturally Stable** | Equal elements always preserve original relative order — guaranteed by left-to-right chunk processing, not by extra bookkeeping |
 | **Cache Efficient** | Scatter buffer bounded to L1 cache size — random writes stay in L1, eliminating cache thrashing |
-| **Fast** | Beats DPQ by 2.2x on random data, 8.9x on duplicates vs TimSort at large n |
+| **Fast** | Beats DPQ by 2.2x on random data, 9.6x on duplicates vs TimSort at large n |
 | **Distribution-Aware** | Bucket range dynamically mapped to `[min, max]` — no wasted buckets regardless of value range |
 | **Generic Support** | Works on any object type via `ToIntFunction<T>` key extractor |
 | **Zero Comparison Overhead** | No comparator calls in the hot path — pure integer arithmetic for bucketing |
@@ -31,7 +31,7 @@ Two variants are available:
 | **Bounded Stack Depth** | 128-way split → max ~4 levels at 100M elements, no JVM stack overflow risk |
 | **Parallel-Ready** | Each bucket is independent after the histogram pass — parallel processing can be integrated naturally |
 
-> Note: Stack is currently statically sized (`BUCKETS * 4`). Dynamic stack is a planned improvement.
+> Note: Stack is currently statically sized (`BUCKETS * 8`). Dynamic stack is a planned improvement.
 
 ---
 
@@ -98,6 +98,7 @@ This holds because:
 Equal-key objects in the generic variant are handled the same way — stability comes from traversal order, not from tagging or index tracking.
 
 The reverse-sorted early exit uses a three-pointer stable reverse — equal-key groups are copied left-to-right, preserving original order.
+
 > For `int[]`, equal integers are identical by value — stability is technically unobservable. However, the stable reverse path is intentionally preserved for consistency with the stability guarantee and to serve as a reference for future ports to other types.
 
 ---
@@ -134,25 +135,25 @@ Tested against Java's `Arrays.sort(int[])` which uses **Dual-Pivot Quicksort**.
 
 Tested against Java's `Arrays.sort(T[])` which uses **TimSort**.
 
-**Machine:** 11th Gen Intel Core i5-1135G7 @ 2.40GHz | **Java:** 17 | **n:** 40,000,000
+**Machine:** 11th Gen Intel Core i5-1135G7 @ 2.40GHz | **Java:** 17 | **n:** 70,000,000
 **Methodology:** JMH 1.37 — 5 warmup iterations, 10 measurement iterations, 3 JVM forks
 
-| Input Type     | BusSort (ms) | ± Error | TimSort (ms) | ± Error | Ratio     |
-|----------------|-------------|---------|-------------|---------|-----------|
-| Random         | 7357        | ±162    | 21691       | ±277    | **2.9x** ✅ |
-| Duplicates     | 619         | ±8      | 5510        | ±55     | **8.9x** ✅ |
-| Few Duplicates | 3680        | ±90     | 7412        | ±114    | **2.0x** ✅ |
-| Clustered      | 1804        | ±97     | 5599        | ±103    | **3.1x** ✅ |
-| All Same       | 34          | ±0.6    | 34          | ±0.8    | ~1x ✅    |
-| Sorted         | 63          | ±0.2    | 61          | ±0.3    | ~1x       |
-| Nearly Sorted  | 2541        | ±103    | 1835        | ±160    | 0.7x ❌   |
-| Reverse        | 652         | ±11     | 313         | ±2      | 0.5x ❌   |
+| Input Type     | BusSort (ms) | ± Error | TimSort (ms) | ± Error  | Ratio     |
+|----------------|-------------|---------|-------------|----------|-----------|
+| Random         | 14877       | ±549    | 43994       | ±85      | **2.96x** ✅ |
+| Duplicates     | 956         | ±28     | 9194        | ±56      | **9.62x** ✅ |
+| Few Duplicates | 5909        | ±195    | 17122       | ±1022    | **2.90x** ✅ |
+| Clustered      | 3107        | ±137    | 9289        | ±135     | **2.99x** ✅ |
+| All Same       | 63          | ±0.4    | 55          | ±0.5     | ~1x ✅    |
+| Sorted         | 102         | ±1.0    | 100         | ±0.5     | ~1x       |
+| Nearly Sorted  | 4382        | ±63     | 4977        | ±850     | **1.14x** ✅ |
+| Reverse        | 1176        | ±20     | 520         | ±2       | 0.5x ❌   |
 
-**5/8 input types faster. Naturally stable. 8.9x on duplicates.**
+**6/8 input types faster or equal. Naturally stable. 9.62x on duplicates.**
 
 **Where BusSort wins:** distribution-heavy inputs — TimSort has no way to exploit value distribution, BusSort collapses duplicate-heavy data in 1-2 recursion levels.
 
-**Where TimSort wins:** structure-heavy inputs — TimSort's run detection is unbeatable on nearly sorted and reverse data. BusSort processes these correctly but without structural shortcuts.
+**Where TimSort wins:** reverse sorted data — TimSort's run detection is unbeatable here. BusSort processes it correctly but without structural shortcuts.
 
 ---
 
@@ -171,7 +172,7 @@ java -jar target/benchmarks.jar -wi 5 -i 10 -f 3 -p n=100000000
 ```bash
 cd generics/benchmarks
 mvn clean package -DskipTests
-java -jar target/benchmarks.jar BusSortGenericsBenchmark -wi 5 -i 10 -f 3 -p n=40000000
+java -jar target/benchmarks.jar BusSortGenericsBenchmark -wi 5 -i 10 -f 3 -p n=70000000
 ```
 
 ---
@@ -188,6 +189,18 @@ java -jar target/benchmarks.jar BusSortGenericsBenchmark -wi 5 -i 10 -f 3 -p n=4
 | Stable           | ✅ Yes — naturally, no extra bookkeeping |
 | Comparison-based | ❌ No |
 | In-place         | ❌ No |
+
+---
+
+## Known Limitations
+
+**Adversarial case — recursive bucket collapse:**
+BusSort can degrade on inputs where values follow a heavily skewed distribution (e.g. exponential or power-law), causing most elements to fall into a single bucket at every recursion level. In the extreme case, this results in O(n · log₁₂₈(n)) with a very large constant — significantly worse than TimSort on the same input.
+
+This requires an artificially constructed or statistically unusual input. Real-world datasets with a natural int key (IDs, timestamps, scores, sensor readings) almost never exhibit this pattern. A health-check fallback (O(BUCKETS) per level, inspecting the histogram before committing to distribute) is planned to mitigate this case without impacting the common path.
+
+**No pure `Comparator<T>` support:**
+BusSortGenerics requires a `ToIntFunction<T>` key extractor — it cannot sort arbitrary `Comparable` objects without a numeric key. This is a fundamental trade-off: arithmetic bucketing requires a numeric key; comparison-based sorting does not.
 
 ---
 
@@ -211,7 +224,7 @@ On i5-1135G7 (48KB L1 data cache): `4096 × 3 × 4 = 49,152 bytes ≈ 48KB` — 
 | Dual-Pivot Quicksort | ❌      | baseline            | —                      | partial      | Java default for primitives |
 | TimSort              | ✅      | ❌                   | baseline               | partial      | Java default for objects |
 | **BusSort (int[])**  | ✅      | **2.2x**            | —                      | **yes (L1)** | This work |
-| **BusSortGenerics**  | ✅      | —                   | **2.9x**               | **yes (L1)** | This work |
+| **BusSortGenerics**  | ✅      | —                   | **2.96x**              | **yes (L1)** | This work |
 
 ---
 
@@ -221,6 +234,7 @@ On i5-1135G7 (48KB L1 data cache): `4096 × 3 × 4 = 49,152 bytes ≈ 48KB` — 
 - [x] Stable reverse path
 - [x] Generic `T[]` support via `ToIntFunction<T>`
 - [x] JMH benchmarks for both variants
+- [ ] Health-check fallback for adversarial distribution collapse
 - [ ] Dynamic stack sizing
 - [ ] Auto-tune `BUS_SIZE` based on runtime L1 cache size
 - [ ] Parallel / multi-threaded variant
