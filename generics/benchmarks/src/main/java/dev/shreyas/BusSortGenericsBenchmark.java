@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(3)
 public class BusSortGenericsBenchmark {
 
-    @Param({"1000000", "10000000", "40000000"})
+    @Param({"1000000", "10000000", "70000000"})
     public int n;
 
     @Param({"RANDOM", "SORTED", "REVERSE", "NEARLY_SORTED",
@@ -132,7 +132,7 @@ public class BusSortGenericsBenchmark {
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
                 .include(BusSortGenericsBenchmark.class.getSimpleName())
-                .param("n", "40000000")
+                .param("n", "70000000")
                 .param("inputType", "RANDOM", "DUPLICATES", "FEW_DUPLICATES", "CLUSTERED")
                 .warmupIterations(3)
                 .measurementIterations(5)
