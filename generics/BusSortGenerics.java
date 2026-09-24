@@ -6,9 +6,9 @@ import java.util.function.ToIntFunction;
 // Uses ToIntFunction<T> key extractor. Beats Java's TimSort on distribution-heavy inputs.
 public class BusSortGenerics {
 
-    static final int BUCKETS = 128;
+    static final int BUCKETS = 80;
     static final int BUS_SIZE = 4096;
-    static final int THRESHOLD = 1024;
+    static final int THRESHOLD = 64;
 
     // ============================================================
     // BUCKET INDEX
