@@ -22,10 +22,11 @@ import java.util.concurrent.TimeUnit;
  * Quick test:
  *   java -jar target/benchmarks.jar BusSortGenericsBenchmark -wi 1 -i 2 -f 1 -p n=1000000
  *
- * Scalability sweep:
- *   java -jar target/benchmarks.jar BusSortGenericsBenchmark -wi 3 -i 5 -f 1
- *     -p n=1000000,5000000,10000000,20000000,40000000,70000000
- *     -p inputType=RANDOM
+ * Uses BusSortGenerics.java's locked-in constants directly (BUCKETS=80, BUS_SIZE=4096,
+ * THRESHOLD=64) — see BusSortGenerics.java for the tuning process behind these values.
+ * Note: n is capped at 10,000,000 here (not 70,000,000 like earlier sweeps) — Record[]
+ * carries far more per-element memory overhead than int[], and this was found to OOM
+ * on machines with ~8GB RAM. Raise the cap if your machine has more headroom.
  */
 
 @BenchmarkMode(Mode.AverageTime)
@@ -53,11 +54,11 @@ public class BusSortGenericsBenchmark {
     // Parameters
     // ----------------------------------------------------------------
 
-    @Param({"1000000", "5000000", "10000000", "20000000", "40000000", "70000000"})
+    @Param({"1000", "10000", "100000", "1000000", "10000000"})
     public int n;
 
     @Param({"RANDOM", "SORTED", "REVERSE", "NEARLY_SORTED",
-            "DUPLICATES", "FEW_DUPLICATES", "ALL_SAME", "CLUSTERED"})
+            "DUPLICATES", "FEW_DUPLICATES", "ALL_SAME", "CLUSTERED", "ADVERSARIAL"})
     public String inputType;
 
     private Record[] template;
@@ -190,6 +191,16 @@ public class BusSortGenericsBenchmark {
                     arr[i] = new Record(500_000 + rng.nextInt(0, 100), i);
                 break;
 
+            case "ADVERSARIAL":
+                // one dominant bucket: 99% of elements packed into a tiny key range,
+                // remaining 1% spread across the full int range — stresses histogram skew
+                int denseCount = (int) (n * 0.99);
+                for (int i = 0; i < denseCount; i++)
+                    arr[i] = new Record(rng.nextInt(0, 1000), i);
+                for (int i = denseCount; i < n; i++)
+                    arr[i] = new Record(rng.nextInt(), i);
+                break;
+
             default:
                 throw new IllegalArgumentException("Unknown input type: " + type);
         }
@@ -205,9 +216,9 @@ public class BusSortGenericsBenchmark {
 
         Options opt = new OptionsBuilder()
                 .include(BusSortGenericsBenchmark.class.getSimpleName())
-                .param("n", "1000000", "5000000", "10000000", "20000000", "40000000", "70000000")
+                .param("n", "1000000", "10000000")
                 .param("inputType", "RANDOM", "DUPLICATES", "FEW_DUPLICATES", "CLUSTERED",
-                                    "SORTED", "REVERSE", "NEARLY_SORTED", "ALL_SAME")
+                                    "SORTED", "REVERSE", "NEARLY_SORTED", "ALL_SAME", "ADVERSARIAL")
                 .warmupIterations(3)
                 .measurementIterations(5)
                 .forks(1)
