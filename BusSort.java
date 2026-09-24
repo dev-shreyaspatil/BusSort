@@ -5,7 +5,7 @@ import java.util.concurrent.ThreadLocalRandom;
 // Generic support: see BusSortGenerics.java
 public class BusSort {
 
-    static final int BUCKETS = 256; // 64 for small data
+    static final int BUCKETS = 256;
     static final int BUS_SIZE = 4096;
     static final int THRESHOLD = 64;
 
