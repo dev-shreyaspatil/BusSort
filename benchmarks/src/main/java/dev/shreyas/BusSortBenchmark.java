@@ -23,6 +23,12 @@ import java.util.concurrent.TimeUnit;
  *
  * Filter to one input type:
  *   java -jar target/benchmarks.jar ".*RANDOM.*"
+ *
+ * With GC profiling:
+ *   java -jar target/benchmarks.jar -wi 5 -i 10 -f 3 -prof gc
+ *
+ * Uses BusSort.java's locked-in constants directly (BUCKETS=256, BUS_SIZE=4096,
+ * THRESHOLD=64) — see BusSort.java for the tuning process behind these values.
  */
 
 @BenchmarkMode(Mode.AverageTime)        // measure average time per op
@@ -36,14 +42,14 @@ public class BusSortBenchmark {
     // ----------------------------------------------------------------
     // Benchmark size — change this to test different scales
     // ----------------------------------------------------------------
-    @Param({"1000000", "10000000", "100000000"})
+    @Param({"1000", "10000", "100000", "1000000", "10000000", "100000000"})
     public int n;
 
     // ----------------------------------------------------------------
     // Input type — JMH will run all combinations with n
     // ----------------------------------------------------------------
     @Param({"RANDOM", "SORTED", "REVERSE", "NEARLY_SORTED",
-            "DUPLICATES", "FEW_DUPLICATES", "ALL_SAME", "CLUSTERED"})
+            "DUPLICATES", "FEW_DUPLICATES", "ALL_SAME", "CLUSTERED", "ADVERSARIAL"})
     public String inputType;
 
     // The "template" array — generated once in setup, copied fresh before each benchmark
@@ -72,7 +78,7 @@ public class BusSortBenchmark {
 
     @Benchmark
     public int[] busSort() {
-        BusSort.sort(workingCopy);
+        BusSort.sort(workingCopy, 0, workingCopy.length - 1);
         return workingCopy; // return to prevent dead-code elimination by JIT
     }
 
@@ -139,6 +145,16 @@ public class BusSortBenchmark {
                     arr[i] = 100_000 + rng.nextInt(0, 100);
                 for (int i = 2 * n / 3; i < n; i++)
                     arr[i] = 500_000 + rng.nextInt(0, 100);
+                break;
+
+            case "ADVERSARIAL":
+                // one dominant bucket: 99% of elements packed into a tiny key range,
+                // remaining 1% spread across the full int range — stresses histogram skew
+                int denseCount = (int) (n * 0.99);
+                for (int i = 0; i < denseCount; i++)
+                    arr[i] = rng.nextInt(0, 1000);
+                for (int i = denseCount; i < n; i++)
+                    arr[i] = rng.nextInt();
                 break;
 
             default:
